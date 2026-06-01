@@ -1,0 +1,218 @@
+# ==============================================================================
+# META-ANALYSIS: GENOMIC INBREEDING AND FITNESS EFFECTS
+# ==============================================================================
+
+# Clear environment
+rm(list = ls())
+
+# Load required packages
+library(metafor)
+
+# ==============================================================================
+# 1. LOAD AND PREPARE DATA
+# ==============================================================================
+
+# Load data
+data <- read.csv("C:/Users/julia/OneDrive/ECCC research/Deliverables/Deliverable 5/Meta-analysis_database.csv", 
+                 header = TRUE)
+
+# Check data structure
+head(data)
+str(data)
+summary(data)
+
+# Check for missing values
+sum(is.na(data$Effect_size))
+sum(is.na(data$SE))
+
+# ==============================================================================
+# 2. OVERALL MODEL
+# ==============================================================================
+
+model_overall <- rma(yi = Effect_size, 
+                     sei = SE, 
+                     data = data,
+                     method = "REML")
+
+summary(model_overall)
+
+# Forest plot (initial)
+forest(model_overall, 
+       slab = data$Effect_ID,
+       xlab = "Fisher's z",
+       main = "Overall Effect Sizes (with outliers)")
+
+# Funnel plot (initial)
+funnel(model_overall,
+       xlab = "Fisher's z",
+       main = "Funnel Plot (with outliers)")
+
+# ==============================================================================
+# 3. IDENTIFY AND REMOVE OUTLIERS
+# ==============================================================================
+
+# Influence diagnostics
+inf <- influence(model_overall)
+plot(inf)
+
+# Identify outliers using standardized residuals
+data$resid <- rstandard(model_overall)$z
+outliers <- data[abs(data$resid) > 3, c("Effect_ID", "Effect_size", "resid")]
+print("Outliers (|residual| > 3):")
+print(outliers)
+
+# Create cleaned dataset (remove outliers)
+data_clean <- data[abs(data$resid) <= 3, ]
+
+# Report how many removed
+n_removed <- nrow(data) - nrow(data_clean)
+cat("\nRemoved", n_removed, "outliers\n")
+cat("Remaining studies:", nrow(data_clean), "\n")
+
+# ==============================================================================
+# 4. MAIN MODELS (with cleaned data)
+# ==============================================================================
+
+# Overall effect (outliers removed)
+model_clean <- rma(yi = Effect_size, 
+                   sei = SE, 
+                   data = data_clean,
+                   method = "REML")
+
+cat("\n=== OVERALL EFFECT (CLEANED) ===\n")
+summary(model_clean)
+
+# Convert Fisher's z to correlation for interpretation
+z_overall <- coef(model_clean)
+r_overall <- (exp(2*z_overall) - 1) / (exp(2*z_overall) + 1)
+cat("\nOverall correlation (r):", round(r_overall, 3), "\n")
+
+# ==============================================================================
+# 5. MODERATOR ANALYSIS
+# ==============================================================================
+
+# --- Study system ---
+model_system <- rma(yi = Effect_size, 
+                   sei = SE, 
+                   mods = ~ Study_system,
+                   data = data_clean,
+                   method = "REML")
+
+cat("\n=== STUDY SYSTEM MODEL ===\n")
+summary(model_system)
+
+# --- Trait Category ---
+model_trait <- rma(yi = Effect_size, 
+                   sei = SE, 
+                   mods = ~ Trait_category,
+                   data = data_clean,
+                   method = "REML")
+
+cat("\n=== TRAIT CATEGORY MODEL ===\n")
+summary(model_trait)
+
+# --- ROH >1 Mb ---
+model_roh_1mb <- rma(yi = Effect_size, 
+                     sei = SE, 
+                     mods = ~ ROH_long,
+                     data = data_clean,
+                     method = "REML")
+
+cat("\n=== ROH >1 MB MODEL ===\n")
+summary(model_roh_1mb)
+
+# --- Combined Model (Study system + Trait) ---
+model_combined <- rma(yi = Effect_size, 
+                      sei = SE, 
+                      mods = ~ Study_system + Trait_category,
+                      data = data_clean,
+                      method = "REML")
+
+cat("\n=== COMBINED MODEL (Study system + Trait) ===\n")
+summary(model_combined)
+
+# --- Full Model (Study system + Trait + ROH >1Mb) ---
+model_full <- rma(yi = Effect_size, 
+                  sei = SE, 
+                  mods = ~ Study_system + Trait_category + ROH_long,
+                  data = data_clean,
+                  method = "REML")
+
+cat("\n=== FULL MODEL (Taxonomy + Trait + ROH >1Mb) ===\n")
+summary(model_full)
+
+# ==============================================================================
+# 6. PUBLICATION BIAS ASSESSMENT
+# ==============================================================================
+
+cat("\n=== PUBLICATION BIAS TESTS ===\n")
+
+# Egger's regression test
+egger <- regtest(model_clean)
+print(egger)
+
+# Trim and fill
+tf <- trimfill(model_clean)
+print(tf)
+
+# ==============================================================================
+# 7. FIGURES 
+# ==============================================================================
+
+# --- Forest Plot (Overall, cleaned) ---
+png("forest_plot_overall.png", width = 10, height = 12, units = "in", res = 300)
+forest(model_clean, 
+       slab = data_clean$Effect_ID,
+       xlab = "Fisher's z (Effect Size)",
+       main = "Meta-Analysis: Genomic Inbreeding and Fitness",
+       cex = 0.7,
+       col = "blue")
+dev.off()
+
+# --- Funnel Plot ---
+png("funnel_plot.png", width = 8, height = 8, units = "in", res = 300)
+funnel(model_clean,
+       xlab = "Fisher's z",
+       main = "Funnel Plot")
+abline(v = 0, lty = 2)
+dev.off()
+
+# --- Funnel Plot with Trim-and-Fill ---
+png("funnel_plot_trimfill.png", width = 8, height = 8, units = "in", res = 300)
+funnel(tf,
+       xlab = "Fisher's z",
+       main = "Funnel Plot with Trim-and-Fill")
+abline(v = 0, lty = 2)
+dev.off()
+
+# --- Forest Plot by Study system ---
+png("forest_plot_system.png", width = 10, height = 12, units = "in", res = 300)
+forest(model_system,
+       slab = data_clean$Effect_ID,
+       xlab = "Fisher's z",
+       main = "Inbreeding Depression by Taxonomic Group",
+       cex = 0.7,
+       order = data_clean$Study_system)
+dev.off()
+
+# ==============================================================================
+# 8. SUMMARY TABLE OF MODELS
+# ==============================================================================
+
+cat("\n=== MODEL COMPARISON SUMMARY ===\n")
+cat("Model                    | R²      | tau²   | I²      | QM p-value\n")
+cat("----------------------------------------------------------------\n")
+cat(sprintf("Overall (cleaned)        | --      | %.4f | %.2f%% | --\n", 
+            model_clean$tau2, model_clean$I2))
+cat(sprintf("Taxonomic Group          | %.2f%% | %.4f | %.2f%% | %.4f\n", 
+            model_system$R2, model_system$tau2, model_system$I2, model_system$QMp))
+cat(sprintf("Trait Category           | %.2f%% | %.4f | %.2f%% | %.4f\n", 
+            model_trait$R2, model_trait$tau2, model_trait$I2, model_trait$QMp))
+cat(sprintf("ROH Long                 | %.2f%% | %.4f | %.2f%% | %.4f\n", 
+            model_roh_1mb$R2, model_roh_1mb$tau2, model_roh_1mb$I2, model_roh_1mb$QMp))
+cat(sprintf("Combined (Tax + Trait)   | %.2f%% | %.4f | %.2f%% | %.4f\n", 
+            model_combined$R2, model_combined$tau2, model_combined$I2, model_combined$QMp))
+
+cat("\n=== ANALYSIS COMPLETE ===\n")
+cat("Figures saved to working directory\n")
+
